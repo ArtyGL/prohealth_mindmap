@@ -27,7 +27,7 @@ body{
     linear-gradient(90deg, var(--grid) 1px, transparent 1px);
   background-size:40px 40px;
 }
-.viewport{position:relative;width:100vw;height:100vh;overflow:hidden;cursor:grab}
+.viewport{position:relative;width:100vw;height:100vh;overflow:hidden;cursor:grab;touch-action:none}
 .viewport.dragging{cursor:grabbing}
 .canvas{position:absolute;left:0;top:0;transform-origin:0 0;padding:110px 180px 120px 90px;width:max-content;min-width:100%;min-height:100%}
 
@@ -189,6 +189,8 @@ buildTree();
 
 let scale = 1, x = 40, y = 30;
 let isDragging = false, dragMoved = false, startX = 0, startY = 0;
+let pinchStartDist = null, pinchStartScale = 1, pinchCenter = null;
+let activeTouches = new Map();
 
 function applyTransform(){
   canvas.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
@@ -197,6 +199,16 @@ function applyTransform(){
 function zoomAt(factor, cx = innerWidth/2, cy = innerHeight/2){
   const prev = scale;
   scale = Math.min(2.6, Math.max(0.22, scale * factor));
+  const wx = (cx - x) / prev;
+  const wy = (cy - y) / prev;
+  x = cx - wx * scale;
+  y = cy - wy * scale;
+  applyTransform();
+}
+
+function setScaleAt(newScale, cx = innerWidth/2, cy = innerHeight/2){
+  const prev = scale;
+  scale = Math.min(2.6, Math.max(0.22, newScale));
   const wx = (cx - x) / prev;
   const wy = (cy - y) / prev;
   x = cx - wx * scale;
@@ -217,6 +229,7 @@ viewport.addEventListener('mousedown', (e) => {
   startX = e.clientX - x;
   startY = e.clientY - y;
 });
+
 window.addEventListener('mousemove', (e) => {
   if (!isDragging) return;
   const nx = e.clientX - startX;
@@ -224,10 +237,93 @@ window.addEventListener('mousemove', (e) => {
   if (Math.abs(nx-x) > 2 || Math.abs(ny-y) > 2) dragMoved = true;
   x = nx; y = ny; applyTransform();
 });
+
 window.addEventListener('mouseup', () => {
   isDragging = false;
   viewport.classList.remove('dragging');
   setTimeout(() => dragMoved = false, 0);
+});
+
+// Touch / pointer support for mobile and tablet
+function distance(a, b){
+  const dx = a.clientX - b.clientX;
+  const dy = a.clientY - b.clientY;
+  return Math.hypot(dx, dy);
+}
+function midpoint(a, b){
+  return {
+    x: (a.clientX + b.clientX) / 2,
+    y: (a.clientY + b.clientY) / 2
+  };
+}
+
+viewport.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('.toolbtn')) return;
+  activeTouches.set(e.pointerId, {clientX: e.clientX, clientY: e.clientY});
+  try { viewport.setPointerCapture(e.pointerId); } catch(err) {}
+
+  if (activeTouches.size === 1){
+    const p = [...activeTouches.values()][0];
+    isDragging = true;
+    dragMoved = false;
+    viewport.classList.add('dragging');
+    startX = p.clientX - x;
+    startY = p.clientY - y;
+  } else if (activeTouches.size === 2){
+    isDragging = false;
+    viewport.classList.remove('dragging');
+    const [a, b] = [...activeTouches.values()];
+    pinchStartDist = distance(a, b);
+    pinchStartScale = scale;
+    pinchCenter = midpoint(a, b);
+  }
+}, {passive:false});
+
+viewport.addEventListener('pointermove', (e) => {
+  if (!activeTouches.has(e.pointerId)) return;
+  activeTouches.set(e.pointerId, {clientX: e.clientX, clientY: e.clientY});
+
+  if (activeTouches.size === 1 && isDragging){
+    const p = [...activeTouches.values()][0];
+    const nx = p.clientX - startX;
+    const ny = p.clientY - startY;
+    if (Math.abs(nx-x) > 2 || Math.abs(ny-y) > 2) dragMoved = true;
+    x = nx; y = ny; applyTransform();
+    e.preventDefault();
+  } else if (activeTouches.size === 2){
+    const [a, b] = [...activeTouches.values()];
+    const dist = distance(a, b);
+    const center = midpoint(a, b);
+    if (pinchStartDist && pinchStartDist > 0){
+      const newScale = pinchStartScale * (dist / pinchStartDist);
+      setScaleAt(newScale, center.x, center.y);
+      dragMoved = true;
+    }
+    e.preventDefault();
+  }
+}, {passive:false});
+
+function clearPointer(e){
+  activeTouches.delete(e.pointerId);
+  if (activeTouches.size === 0){
+    isDragging = false;
+    pinchStartDist = null;
+    viewport.classList.remove('dragging');
+    setTimeout(() => dragMoved = false, 0);
+  } else if (activeTouches.size === 1){
+    const p = [...activeTouches.values()][0];
+    isDragging = true;
+    startX = p.clientX - x;
+    startY = p.clientY - y;
+    pinchStartDist = null;
+  }
+}
+
+viewport.addEventListener('pointerup', clearPointer);
+viewport.addEventListener('pointercancel', clearPointer);
+viewport.addEventListener('pointerleave', (e) => {
+  if (e.pointerType === 'mouse') return;
+  clearPointer(e);
 });
 
 document.getElementById('zoomIn').onclick = () => zoomAt(1.12);
