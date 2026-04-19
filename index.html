@@ -42,6 +42,27 @@ body{
   border-radius:10px;padding:9px 12px;font-size:14px;cursor:pointer;min-width:42px;
 }
 .toolbtn:hover{background:#f6f9ff}
+
+.menu-toggle{
+  position:fixed;top:16px;right:16px;z-index:45;
+  width:44px;height:44px;border-radius:12px;
+  border:1px solid #d4e1f8;background:rgba(255,255,255,.92);
+  box-shadow:0 12px 26px rgba(31,61,120,.08);
+  backdrop-filter:blur(8px);display:none;align-items:center;justify-content:center;
+  cursor:pointer;color:#21406f;
+}
+.menu-toggle .bars{
+  width:18px;height:12px;position:relative;display:block;
+}
+.menu-toggle .bars::before,
+.menu-toggle .bars::after,
+.menu-toggle .bars span{
+  content:"";position:absolute;left:0;right:0;height:2px;background:currentColor;border-radius:2px;
+}
+.menu-toggle .bars::before{top:0}
+.menu-toggle .bars span{top:5px}
+.menu-toggle .bars::after{bottom:0}
+
 .hint{
   position:fixed;left:16px;top:16px;z-index:30;
   padding:10px 12px;border-radius:12px;font-size:13px;color:#49658f;
@@ -91,6 +112,22 @@ body{
 .node-card.clickable{cursor:pointer}
 .children[hidden]{display:none}
 
+
+/* Mobile menu */
+@media (max-width: 900px){
+  .menu-toggle{display:flex}
+  .toolbar{
+    top:68px;right:16px;left:auto;max-width:calc(100vw - 32px);
+    flex-direction:column;align-items:stretch;gap:6px;
+    transform:translateY(-8px);opacity:0;pointer-events:none;
+    transition:opacity .18s ease, transform .18s ease;
+  }
+  .toolbar.open{
+    transform:translateY(0);opacity:1;pointer-events:auto;
+  }
+  .hint{max-width:calc(100vw - 32px);font-size:12px;padding:8px 10px}
+}
+
 @media (max-width:1000px){
   .canvas{padding:100px 110px 120px 70px}
   .tree ul{margin-left:52px}
@@ -102,8 +139,11 @@ body{
 </style>
 </head>
 <body>
+  <button class="menu-toggle" id="menuToggle" aria-label="Открыть меню">
+    <span class="bars"><span></span></span>
+  </button>
   <div class="hint">Клик по плашке или по кружку — раскрыть / свернуть • Колесо — масштаб • ЛКМ — перемещение</div>
-  <div class="toolbar">
+  <div class="toolbar" id="toolbar">
     <button class="toolbtn" id="zoomIn">+</button>
     <button class="toolbtn" id="zoomOut">−</button>
     <button class="toolbtn" id="fitView">Показать всё</button>
@@ -137,6 +177,7 @@ function createNode(item, depth=0){
   toggle.className = 'toggle';
 
   const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+
   if (!hasChildren) {
     toggle.classList.add('hidden');
     toggle.textContent = '';
@@ -163,9 +204,12 @@ function createNode(item, depth=0){
 
     setState(depth < 1);
 
+    let lastToggleAt = 0;
     const onToggle = (e) => {
-      if (dragMoved) return;
-      e.stopPropagation();
+      const now = Date.now();
+      if (now - lastToggleAt < 180) return;
+      lastToggleAt = now;
+      if (e) e.stopPropagation();
       setState(li.dataset.open !== '1');
       requestAnimationFrame(() => applyTransform());
     };
@@ -222,7 +266,7 @@ viewport.addEventListener('wheel', (e) => {
 }, {passive:false});
 
 viewport.addEventListener('mousedown', (e) => {
-  if (e.target.closest('.toolbtn')) return;
+  if (e.target.closest('.toolbtn') || e.target.closest('.node-card') || e.target.closest('.toggle')) return;
   isDragging = true;
   dragMoved = false;
   viewport.classList.add('dragging');
@@ -241,7 +285,7 @@ window.addEventListener('mousemove', (e) => {
 window.addEventListener('mouseup', () => {
   isDragging = false;
   viewport.classList.remove('dragging');
-  setTimeout(() => dragMoved = false, 0);
+  setTimeout(() => { dragMoved = false; }, 30);
 });
 
 // Touch / pointer support for mobile and tablet
@@ -259,6 +303,12 @@ function midpoint(a, b){
 
 viewport.addEventListener('pointerdown', (e) => {
   if (e.target.closest('.toolbtn')) return;
+
+  const onNode = e.target.closest('.node-card') || e.target.closest('.toggle');
+
+  // На десктопе не стартуем drag при клике по ноде — иначе ломается раскрытие
+  if (e.pointerType === 'mouse' && onNode) return;
+
   activeTouches.set(e.pointerId, {clientX: e.clientX, clientY: e.clientY});
   try { viewport.setPointerCapture(e.pointerId); } catch(err) {}
 
@@ -309,7 +359,7 @@ function clearPointer(e){
     isDragging = false;
     pinchStartDist = null;
     viewport.classList.remove('dragging');
-    setTimeout(() => dragMoved = false, 0);
+    setTimeout(() => { dragMoved = false; }, 30);
   } else if (activeTouches.size === 1){
     const p = [...activeTouches.values()][0];
     isDragging = true;
@@ -370,6 +420,24 @@ function fitView(){
   applyTransform();
 }
 document.getElementById('fitView').onclick = fitView;
+
+const toolbar = document.getElementById('toolbar');
+const menuToggle = document.getElementById('menuToggle');
+
+function syncMenuMode(){
+  if (window.innerWidth > 900){
+    toolbar.classList.add('open');
+  } else {
+    toolbar.classList.remove('open');
+  }
+}
+if (menuToggle && toolbar){
+  menuToggle.addEventListener('click', () => {
+    if (window.innerWidth <= 900) toolbar.classList.toggle('open');
+  });
+}
+window.addEventListener('resize', syncMenuMode);
+syncMenuMode();
 
 applyTransform();
 setTimeout(fitView, 80);
